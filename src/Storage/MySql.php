@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace IfCastle\AQL\MySql\Storage;
 
-use Async\Coroutine;
-use Async\Scope;
 use IfCastle\AQL\Dsl\Sql\FunctionReference\FunctionReferenceInterface;
 use IfCastle\AQL\Entity\EntityInterface;
 use IfCastle\AQL\Executor\Context\NodeContextInterface;
@@ -13,6 +11,7 @@ use IfCastle\AQL\Executor\FunctionHandlerInterface;
 use IfCastle\AQL\Generator\Ddl\EntityToTableInterface;
 use IfCastle\AQL\MySql\Ddl\Generator\EntityToTable;
 use IfCastle\AQL\PdoDriver\PDOAbstract;
+use IfCastle\AQL\Storage\Exceptions\ConnectFailed;
 use IfCastle\AQL\Storage\Exceptions\DuplicateKeysException;
 use IfCastle\AQL\Storage\Exceptions\QueryException;
 use IfCastle\AQL\Storage\Exceptions\RecoverableException;
@@ -20,60 +19,29 @@ use IfCastle\AQL\Storage\Exceptions\ServerHasGoneAwayException;
 use IfCastle\AQL\Storage\Exceptions\StorageException;
 use IfCastle\DI\Exceptions\ConfigException;
 
-use function Async\await;
-use function Async\spawn_with;
-
 /**
  * MySQL and MariaDB storage on pdo_mysql.
  *
  * One MySql instance serves every coroutine: its PDO runs the TrueAsync connection pool, which gives
  * each coroutine a connection of its own and keeps it while a transaction or a statement is open.
+ * Build it at application startup, before coroutines share it: the constructor opens the pool.
  * Options PDO::ATTR_POOL_MAX, ATTR_POOL_MIN and ATTR_POOL_HEALTHCHECK_INTERVAL tune the pool.
  * The initial_queries config runs on every pooled connection as its init command.
  */
 class MySql extends PDOAbstract implements FunctionHandlerInterface
 {
     /**
-     * The coroutine connecting, while it runs; null otherwise.
+     * Opens the connection pool. With no driver option and no ATTR_POOL_MIN that talks to no server;
+     * otherwise the PDO constructor connects, and the calling coroutine waits for the server.
+     *
+     * @throws ConfigException
+     * @throws ConnectFailed when the server refuses the connection the constructor opens
      */
-    private ?Coroutine $connecting  = null;
-
-    /**
-     * Owns the connecting coroutine, apart from the Scope of the request that happened to start it.
-     */
-    private ?Scope $connectScope    = null;
-
-    /**
-     * Connects once for all coroutines. The PDO constructor can suspend: with the pool it applies
-     * driver options through a pooled connection, and ATTR_POOL_MIN opens connections. The whole retry
-     * sequence runs in one coroutine of the storage's own Scope, and every caller waits for its outcome:
-     * cancelling the caller that started it does not fail the others, and a failure counts one
-     * sequence of attempts, not one per waiting caller.
-     */
-    #[\Override]
-    public function connect(): void
+    public function __construct(array $config)
     {
-        $connecting                 = $this->connecting ??= spawn_with(
-            $this->connectScope ??= new Scope(),
-            function (): void {
-                try {
-                    parent::connect();
-                } finally {
-                    $this->connecting = null;
-                }
-            }
-        );
+        parent::__construct($config);
 
-        await($connecting);
-    }
-
-    #[\Override]
-    public function dispose(): void
-    {
-        $this->connectScope?->cancel();
-        $this->connectScope         = null;
-
-        parent::dispose();
+        $this->connect();
     }
 
     /**
