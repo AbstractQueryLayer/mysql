@@ -17,6 +17,8 @@ use IfCastle\AQL\Storage\Exceptions\QueryException;
 use IfCastle\AQL\Storage\Exceptions\RecoverableException;
 use IfCastle\AQL\Storage\Exceptions\ServerHasGoneAwayException;
 use IfCastle\AQL\Storage\Exceptions\StorageException;
+use IfCastle\AQL\Transaction\IsolationLevelEnum;
+use IfCastle\AQL\Transaction\TransactionInterface;
 use IfCastle\DI\Exceptions\ConfigException;
 
 /**
@@ -45,6 +47,9 @@ class MySql extends PDOAbstract implements FunctionHandlerInterface
 
     private const int CR_SERVER_LOST = 2013;
 
+    // Set by disconnect(): a pool opened later, by the first query, would be opened by several coroutines at once.
+    private bool $disconnected      = false;
+
     /**
      * Opens the connection pool. With no driver option and no ATTR_POOL_MIN that talks to no server;
      * otherwise the PDO constructor connects, and the calling coroutine waits for the server.
@@ -57,6 +62,26 @@ class MySql extends PDOAbstract implements FunctionHandlerInterface
         parent::__construct($config);
 
         $this->connect();
+    }
+
+    /**
+     * @throws ConnectFailed after disconnect(): the pool opens once, when the storage is built
+     */
+    #[\Override]
+    public function connect(): void
+    {
+        if ($this->disconnected) {
+            throw new ConnectFailed('MySql storage is disconnected and does not open its pool again');
+        }
+
+        parent::connect();
+    }
+
+    #[\Override]
+    public function disconnect(): void
+    {
+        $this->disconnected         = true;
+        parent::disconnect();
     }
 
     /**
@@ -135,10 +160,31 @@ class MySql extends PDOAbstract implements FunctionHandlerInterface
         };
     }
 
+    /**
+     * @throws StorageException
+     */
     #[\Override]
-    protected function isNestedTransactionsSupported(): bool
+    protected function realBeginTransaction(TransactionInterface $transaction): void
     {
-        return false;
+        $isolationLevel             = match ($transaction->getIsolationLevel()) {
+            null                    => null,
+            IsolationLevelEnum::UNCOMMITTED  => 'READ UNCOMMITTED',
+            IsolationLevelEnum::COMMITTED    => 'READ COMMITTED',
+            IsolationLevelEnum::REPEATABLE   => 'REPEATABLE READ',
+            IsolationLevelEnum::SERIALIZABLE => 'SERIALIZABLE',
+        };
+
+        if ($isolationLevel === null) {
+            $this->transactionCall($this->dbh->beginTransaction(...), 'BEGIN');
+            return;
+        }
+
+        // SET TRANSACTION without SESSION reaches the next transaction only, so the level does not stay on
+        // the pooled connection. Its open statement keeps the coroutine on that connection until BEGIN.
+        $sql                        = 'SET TRANSACTION ISOLATION LEVEL ' . $isolationLevel;
+        $statement                  = $this->realExecuteQuery($sql);
+        $this->transactionCall($this->dbh->beginTransaction(...), 'BEGIN');
+        unset($statement);
     }
 
     #[\Override]
