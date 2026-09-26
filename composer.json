@@ -23,6 +23,8 @@
     "ifcastle/aql-pdodriver": "*",
     "ifcastle/aql-storage": "*",
     "ext-pdo": "*",
+    "ext-pdo_mysql": "*",
+    "ext-true_async": "*",
     "ifcastle/aql-entity": "*",
     "ifcastle/aql-sqldriver": "*"
   },
