@@ -91,11 +91,9 @@ class MySql extends PDOAbstract implements FunctionHandlerInterface
             }
         }
 
-        // One connection shared by coroutines interleaves their queries on one socket.
-        if (!empty($options[\PDO::ATTR_PERSISTENT])) {
-            throw new ConfigException('MySql storage runs a connection pool: PDO::ATTR_PERSISTENT is not supported');
-        }
+        $options                    = parent::defineOptions($options);
 
+        // Without the pool, coroutines share one connection and interleave their queries on its socket.
         if (\array_key_exists(\PDO::ATTR_POOL_ENABLED, $options) && empty($options[\PDO::ATTR_POOL_ENABLED])) {
             throw new ConfigException('MySql storage runs a connection pool: PDO::ATTR_POOL_ENABLED cannot be off');
         }
