@@ -30,6 +30,21 @@ use IfCastle\DI\Exceptions\ConfigException;
  */
 class MySql extends PDOAbstract implements FunctionHandlerInterface
 {
+    // Error codes of the server and of the client library, the same in MySQL and MariaDB:
+    // https://mariadb.com/kb/en/mariadb-error-code-reference/
+    private const int ER_DUP_KEY    = 1022;
+
+    private const int ER_DUP_ENTRY  = 1062;
+
+    // InnoDB rolls back the whole transaction of the deadlock victim, not only its statement.
+    private const int ER_LOCK_DEADLOCK = 1213;
+
+    private const int ER_DUP_ENTRY_WITH_KEY_NAME = 1586;
+
+    private const int CR_SERVER_GONE_ERROR = 2006;
+
+    private const int CR_SERVER_LOST = 2013;
+
     /**
      * Opens the connection pool. With no driver option and no ATTR_POOL_MIN that talks to no server;
      * otherwise the PDO constructor connects, and the calling coroutine waits for the server.
@@ -87,6 +102,12 @@ class MySql extends PDOAbstract implements FunctionHandlerInterface
     }
 
     #[\Override]
+    protected function isPooled(): bool
+    {
+        return true;
+    }
+
+    #[\Override]
     public function escape(string $value): string
     {
         return '`' . $value . '`';
@@ -99,12 +120,18 @@ class MySql extends PDOAbstract implements FunctionHandlerInterface
             return new QueryException($exception->getMessage(), $sql, $exception);
         }
 
-        return match ($exception->errorInfo[0]) {
-            // please see: https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html
-            1213                => new RecoverableException($exception->errorInfo[2], $sql, $exception),
-            2006                => new ServerHasGoneAwayException($exception->errorInfo[2], $sql, $exception),
-            1022                => new DuplicateKeysException($exception->errorInfo[2], $sql, $exception),
-            default             => new QueryException($exception->errorInfo[2], $sql, $exception)
+        // errorInfo[0] is the SQLSTATE, shared by many errors; errorInfo[1] is the server or client code.
+        $message                    = $exception->errorInfo[2] ?? $exception->getMessage();
+
+        return match ($exception->errorInfo[1] ?? null) {
+            self::ER_LOCK_DEADLOCK  => new RecoverableException($message, $sql, $exception),
+            self::CR_SERVER_GONE_ERROR,
+            self::CR_SERVER_LOST    => new ServerHasGoneAwayException($message, $sql, $exception),
+            self::ER_DUP_KEY,
+            self::ER_DUP_ENTRY,
+            self::ER_DUP_ENTRY_WITH_KEY_NAME
+                                    => new DuplicateKeysException($message, $sql, $exception),
+            default                 => new QueryException($message, $sql, $exception)
         };
     }
 
