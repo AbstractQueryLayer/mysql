@@ -11,6 +11,7 @@ use IfCastle\AQL\Executor\FunctionHandlerInterface;
 use IfCastle\AQL\Generator\Ddl\EntityToTableInterface;
 use IfCastle\AQL\MySql\Ddl\Generator\EntityToTable;
 use IfCastle\AQL\PdoDriver\PDOAbstract;
+use IfCastle\AQL\SqlDriver\OpenTransactions;
 use IfCastle\AQL\Storage\Exceptions\ConnectFailed;
 use IfCastle\AQL\Storage\Exceptions\DuplicateKeysException;
 use IfCastle\AQL\Storage\Exceptions\QueryException;
@@ -20,6 +21,9 @@ use IfCastle\AQL\Storage\Exceptions\StorageException;
 use IfCastle\AQL\Transaction\IsolationLevelEnum;
 use IfCastle\AQL\Transaction\TransactionInterface;
 use IfCastle\DI\Exceptions\ConfigException;
+
+use function Async\coroutine_context;
+use function Async\current_coroutine;
 
 /**
  * MySQL and MariaDB storage on pdo_mysql.
@@ -130,6 +134,34 @@ class MySql extends PDOAbstract implements FunctionHandlerInterface
     protected function isPooled(): bool
     {
         return true;
+    }
+
+    /**
+     * Each coroutine has a pooled connection of its own, so its open transactions live in the context of
+     * the coroutine: a coroutine it spawns starts with none, and so does one that got a finished one's id.
+     */
+    #[\Override]
+    protected function openTransactions(): OpenTransactions
+    {
+        $context                    = coroutine_context();
+        $open                       = $context->findLocal($this);
+
+        if ($open === null) {
+            $owner                  = \WeakReference::create(current_coroutine());
+            $open                   = new OpenTransactions(static fn(): bool => $owner->get()?->isCompleted() ?? true);
+            $context->set($this, $open);
+        }
+
+        return $open;
+    }
+
+    /**
+     * A deadlock victim loses its whole transaction, and a lost connection loses whatever it had open.
+     */
+    #[\Override]
+    protected function endsTransaction(StorageException $exception): bool
+    {
+        return $exception instanceof RecoverableException;
     }
 
     #[\Override]
