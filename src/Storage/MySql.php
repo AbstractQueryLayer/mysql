@@ -241,6 +241,7 @@ class MySql extends PDOAbstract implements FunctionHandlerInterface
             case 'CONCAT':
             case 'CONCAT_WS':
             case 'SUBSTRING':
+            case 'SHA2':
                 $function->resolveSelf();
                 break;
         }
