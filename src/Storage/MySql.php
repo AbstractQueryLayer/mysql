@@ -8,8 +8,10 @@ use IfCastle\AQL\Dsl\Sql\FunctionReference\FunctionReferenceInterface;
 use IfCastle\AQL\Entity\EntityInterface;
 use IfCastle\AQL\Executor\Context\NodeContextInterface;
 use IfCastle\AQL\Executor\FunctionHandlerInterface;
+use IfCastle\AQL\Executor\SqlQueryExecutor;
 use IfCastle\AQL\Generator\Ddl\EntityToTableInterface;
 use IfCastle\AQL\MySql\Ddl\Generator\EntityToTable;
+use IfCastle\AQL\MySql\Executor\MySqlQueryExecutor;
 use IfCastle\AQL\PdoDriver\PDOAbstract;
 use IfCastle\AQL\SqlDriver\OpenTransactions;
 use IfCastle\AQL\Storage\Exceptions\ConnectFailed;
@@ -128,6 +130,12 @@ class MySql extends PDOAbstract implements FunctionHandlerInterface
         }
 
         return [\PDO::ATTR_POOL_ENABLED => true] + $options;
+    }
+
+    #[\Override]
+    protected function newSqlQueryExecutor(): SqlQueryExecutor
+    {
+        return new MySqlQueryExecutor();
     }
 
     #[\Override]
