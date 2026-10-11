@@ -255,6 +255,13 @@ class MySql extends PDOAbstract implements FunctionHandlerInterface
             case 'SHA2':
             // In ON DUPLICATE KEY UPDATE, VALUES(column) is the value the INSERT offered for the column.
             case 'VALUES':
+            // The named locks belong to the connection: GET_LOCK, RELEASE_LOCK and IS_USED_LOCK pass the name
+            // through, CONNECTION_ID and DATABASE take no argument.
+            case 'GET_LOCK':
+            case 'RELEASE_LOCK':
+            case 'IS_USED_LOCK':
+            case 'CONNECTION_ID':
+            case 'DATABASE':
                 $function->resolveSelf();
                 break;
         }
