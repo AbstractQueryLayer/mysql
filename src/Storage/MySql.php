@@ -243,6 +243,7 @@ class MySql extends PDOAbstract implements FunctionHandlerInterface
             case 'NOW':
             case 'UTC_TIMESTAMP':
             case 'COALESCE':
+            case 'IF':
             case 'COUNT':
             case 'SUM':
             case 'MIN':
