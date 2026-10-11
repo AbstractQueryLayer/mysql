@@ -253,6 +253,8 @@ class MySql extends PDOAbstract implements FunctionHandlerInterface
             case 'CONCAT_WS':
             case 'SUBSTRING':
             case 'SHA2':
+            // In ON DUPLICATE KEY UPDATE, VALUES(column) is the value the INSERT offered for the column.
+            case 'VALUES':
                 $function->resolveSelf();
                 break;
         }
