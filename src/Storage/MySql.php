@@ -253,6 +253,7 @@ class MySql extends PDOAbstract implements FunctionHandlerInterface
             case 'CONCAT_WS':
             case 'SUBSTRING':
             case 'SHA2':
+            case 'JSON_VALUE':
             // In ON DUPLICATE KEY UPDATE, VALUES(column) is the value the INSERT offered for the column.
             case 'VALUES':
             // The named locks belong to the connection: GET_LOCK, RELEASE_LOCK and IS_USED_LOCK pass the name
