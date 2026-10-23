@@ -20,6 +20,7 @@ use IfCastle\AQL\Storage\Exceptions\QueryException;
 use IfCastle\AQL\Storage\Exceptions\RecoverableException;
 use IfCastle\AQL\Storage\Exceptions\ServerHasGoneAwayException;
 use IfCastle\AQL\Storage\Exceptions\StorageException;
+use IfCastle\AQL\Storage\SelfPoolingStorageInterface;
 use IfCastle\AQL\Transaction\IsolationLevelEnum;
 use IfCastle\AQL\Transaction\TransactionInterface;
 use IfCastle\DI\Exceptions\ConfigException;
@@ -36,7 +37,7 @@ use function Async\current_coroutine;
  * Options PDO::ATTR_POOL_MAX, ATTR_POOL_MIN and ATTR_POOL_HEALTHCHECK_INTERVAL tune the pool.
  * The initial_queries config runs on every pooled connection as its init command.
  */
-class MySql extends PDOAbstract implements FunctionHandlerInterface
+class MySql extends PDOAbstract implements FunctionHandlerInterface, SelfPoolingStorageInterface
 {
     // Error codes of the server and of the client library, the same in MySQL and MariaDB:
     // https://mariadb.com/kb/en/mariadb-error-code-reference/
