@@ -254,6 +254,7 @@ class MySql extends PDOAbstract implements FunctionHandlerInterface, SelfPooling
             case 'NOW':
             case 'UTC_TIMESTAMP':
             case 'COALESCE':
+            case 'ISNULL':
             case 'IF':
             case 'COUNT':
             case 'SUM':
