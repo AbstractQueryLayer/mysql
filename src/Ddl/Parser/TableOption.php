@@ -15,8 +15,8 @@ class TableOption extends DdlParserAbstract
     public static function isTableOption(TokensIteratorInterface $tokens): bool
     {
         return match ($tokens->currentTokenAsString()) {
-            'AUTOEXTEND_SIZE', 'AUTO_INCREMENT', 'AVG_ROW_LENGTH', 'DEFAULT', 'CHARACTER', 'COMMENT', 'COMPRESSION',
-            'CONNECTION', 'DATA', 'INDEX', 'DIRECTORY', 'DELAY_KEY_WRITE', 'ENCRYPTION',
+            'AUTOEXTEND_SIZE', 'AUTO_INCREMENT', 'AVG_ROW_LENGTH', 'DEFAULT', 'CHARACTER', 'CHARSET', 'COMMENT',
+            'COMPRESSION', 'CONNECTION', 'DATA', 'INDEX', 'DIRECTORY', 'DELAY_KEY_WRITE', 'ENCRYPTION',
             'ENGINE', 'ENGINE_ATTRIBUTE', 'INSERT_METHOD', 'KEY_BLOCK_SIZE',
             'MAX_ROWS', 'MIN_ROWS', 'PACK_KEYS', 'PASSWORD', 'ROW_FORMAT',
             'SECONDARY_ENGINE_ATTRIBUTE', 'STATS_AUTO_RECALC', 'STATS_PERSISTENT',
@@ -57,22 +57,25 @@ class TableOption extends DdlParserAbstract
         // see table_option: https://dev.mysql.com/doc/refman/8.0/en/alter-table.html
         $option                     = $tokens->currentTokenAsString();
 
-        if ($option === 'DEFAULT') {
-            $option                 .= $tokens->nextTokens()->currentTokenAsString();
-        } elseif ($option === 'DATA' || $option === 'INDEX') {
-            $option                 .= $tokens->nextTokens()->currentTokenAsString();
+        // DEFAULT CHARACTER SET, DEFAULT CHARSET, DATA DIRECTORY, INDEX DIRECTORY: the option's own keyword follows.
+        if ($option === 'DEFAULT' || $option === 'DATA' || $option === 'INDEX') {
+            $option                 .= ' ' . $tokens->nextTokens()->currentTokenAsString();
         }
 
-        switch ($tokens->currentTokenAsString()) {
+        $name                       = $tokens->currentTokenAsString();
+        $tokens->nextTokens();
+
+        switch ($name) {
             case 'CHARACTER':
 
-                if ($tokens->nextTokens()->currentTokenAsString() !== 'SET') {
+                if ($tokens->currentTokenAsString() !== 'SET') {
                     throw new ParseException(
                         'Expected CHARACTER SET ' . \sprintf('(got \'%s\')', $tokens->currentTokenAsString())
                     );
                 }
 
-                $value              = $this->parseEqualValue($tokens);
+                $option             .= ' SET';
+                $value              = $this->parseEqualValue($tokens->nextTokens());
                 break;
 
             case 'TABLESPACE':
@@ -103,6 +106,7 @@ class TableOption extends DdlParserAbstract
 
             case 'AUTOEXTEND_SIZE':
             case 'AUTO_INCREMENT':
+            case 'CHARSET':
             case 'AVG_ROW_LENGTH':
             case 'COMMENT':
             case 'COMPRESSION':
@@ -128,9 +132,7 @@ class TableOption extends DdlParserAbstract
                 break;
 
             default:
-                throw new ParseException(
-                    'Unknown table option: ' . $tokens->currentTokenAsString()
-                );
+                throw new ParseException('Unknown table option: ' . $name);
         }
 
         return new TableOptionNode($option, $value);

@@ -9,8 +9,10 @@ use IfCastle\AQL\Dsl\Ddl\AlterOptionInterface;
 use IfCastle\AQL\Dsl\Ddl\ChangeColumn;
 use IfCastle\AQL\Dsl\Ddl\ColumnDefinitionInterface;
 use IfCastle\AQL\Dsl\Ddl\IndexDefinitionInterface;
+use IfCastle\AQL\Dsl\Ddl\NameDefinition;
 use IfCastle\AQL\Dsl\Parser\Exceptions\ParseException;
 use IfCastle\AQL\Dsl\Parser\TokensIteratorInterface;
+use IfCastle\AQL\Dsl\Sql\RawSql;
 
 class AlterOption extends DdlParserAbstract
 {
@@ -28,16 +30,15 @@ class AlterOption extends DdlParserAbstract
             throw new ParseException('Expected ALTER action ' . \sprintf('(got \'%s\')', $action), ['line' => $line]);
         }
 
+        [$type, $what, $line]       = $tokens->nextToken();
         $definition                 = null;
 
-        // Case for RENAME table_name
-        if ($action === 'RENAME' && !\in_array($tokens->currentTokenAsString(), ['TO', 'AS'], true)) {
-            $definition             = ColumnDefinition::parseColumnName($tokens, false);
+        // RENAME [TO | AS] new_tbl_name: without TO or AS the new name follows the action itself.
+        if (\strtoupper((string) $action) === 'RENAME'
+            && !\in_array(\strtoupper((string) $what), ['TO', 'AS', 'COLUMN', 'INDEX', 'KEY'], true)) {
+            $definition             = new NameDefinition(ColumnDefinition::parseColumnName($tokens));
             $what                   = 'TABLE';
-            $tokens->nextTokens();
         } else {
-
-            [$type, $what, $line]   = $tokens->nextToken();
 
             if ($type !== T_STRING) {
                 throw new ParseException(
@@ -104,6 +105,7 @@ class AlterOption extends DdlParserAbstract
                 break;
 
                 // Options for RENAME table
+            case 'TABLE':
             case 'TO':
             case 'AS':
                 $what               = 'TABLE';
@@ -151,10 +153,12 @@ class AlterOption extends DdlParserAbstract
 
             case 'DROP':
 
-                $definition = $isPrimaryKey ? 'PRIMARY KEY' : static::columnOrIndexName($tokens);
-
-                if ($isForeignKey) {
-                    $definition     = 'FOREIGN KEY ' . $definition;
+                if ($isPrimaryKey) {
+                    $definition     = new RawSql('PRIMARY KEY');
+                } elseif ($isForeignKey) {
+                    $definition     = new RawSql('FOREIGN KEY ' . static::columnOrIndexName($tokens));
+                } else {
+                    $definition     = new NameDefinition(static::columnOrIndexName($tokens));
                 }
 
                 break;
@@ -167,9 +171,7 @@ class AlterOption extends DdlParserAbstract
                         $definition         = (new Rename())->parseTokens($tokens);
                         break;
                     case 'TABLE':
-                        if ($definition === null) {
-                            $definition     = ColumnDefinition::parseColumnName($tokens);
-                        }
+                        $definition         ??= new NameDefinition(ColumnDefinition::parseColumnName($tokens));
 
                         break;
                     default:
