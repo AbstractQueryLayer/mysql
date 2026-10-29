@@ -58,6 +58,11 @@ class MySql extends PDOAbstract implements FunctionHandlerInterface, SelfPooling
     private bool $disconnected      = false;
 
     /**
+     * @var \WeakMap<\Async\Coroutine, OpenTransactions>|null
+     */
+    private ?\WeakMap $openByCoroutine = null;
+
+    /**
      * Opens the connection pool. With no driver option and no ATTR_POOL_MIN that talks to no server;
      * otherwise the PDO constructor connects, and the calling coroutine waits for the server.
      *
@@ -146,19 +151,24 @@ class MySql extends PDOAbstract implements FunctionHandlerInterface, SelfPooling
     }
 
     /**
-     * Each coroutine has a pooled connection of its own, so its open transactions live in the context of
-     * the coroutine: a coroutine it spawns starts with none, and so does one that got a finished one's id.
+     * Each coroutine has a pooled connection of its own, so its open transactions are kept per coroutine:
+     * a coroutine it spawns starts with none, and so does one that got a finished one's id.
+     * Kept here and not in the coroutine's context, which would hold the storage for as long as the
+     * coroutine lives: the main coroutine of a CLI process never ends.
      */
     #[\Override]
     protected function openTransactions(): OpenTransactions
     {
-        $context                    = coroutine_context();
-        $open                       = $context->findLocal($this);
+        // Starts the scheduler in a CLI process that has not started it: current_coroutine() fails before.
+        coroutine_context();
+        $coroutine                  = current_coroutine();
+        $this->openByCoroutine      ??= new \WeakMap();
+        $open                       = $this->openByCoroutine[$coroutine] ?? null;
 
         if ($open === null) {
-            $owner                  = \WeakReference::create(current_coroutine());
+            $owner                  = \WeakReference::create($coroutine);
             $open                   = new OpenTransactions(static fn(): bool => $owner->get()?->isCompleted() ?? true);
-            $context->set($this, $open);
+            $this->openByCoroutine[$coroutine] = $open;
         }
 
         return $open;
