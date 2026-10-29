@@ -34,11 +34,16 @@ class IndexDefinition extends DdlParserAbstract
             $token                  = $tokens->currentTokenAsString();
         }
 
-        if ($token !== 'INDEX' && $token !== 'KEY') {
+        $isKeyword                  = $token === 'INDEX' || $token === 'KEY';
+
+        // INDEX or KEY is optional after UNIQUE, FULLTEXT and SPATIAL, and required otherwise: PRIMARY KEY, KEY, INDEX.
+        if (!$isKeyword && ($indexRole === null || $indexRole === 'PRIMARY')) {
             throw new ParseException('Expected INDEX or KEY ' . \sprintf('(got \'%s\')', $token));
         }
 
-        $tokens->nextTokens();
+        if ($isKeyword) {
+            $tokens->nextTokens();
+        }
 
         $indexName                  = ColumnDefinition::parseColumnName($tokens, false);
         $indexType                  = ColumnDefinition::parseColumnName($tokens, false);

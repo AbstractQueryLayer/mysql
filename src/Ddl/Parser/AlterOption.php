@@ -12,7 +12,6 @@ use IfCastle\AQL\Dsl\Ddl\IndexDefinitionInterface;
 use IfCastle\AQL\Dsl\Ddl\NameDefinition;
 use IfCastle\AQL\Dsl\Parser\Exceptions\ParseException;
 use IfCastle\AQL\Dsl\Parser\TokensIteratorInterface;
-use IfCastle\AQL\Dsl\Sql\RawSql;
 
 class AlterOption extends DdlParserAbstract
 {
@@ -33,6 +32,12 @@ class AlterOption extends DdlParserAbstract
         [$type, $what, $line]       = $tokens->nextToken();
         $definition                 = null;
 
+        // ADD {INDEX | KEY | PRIMARY KEY | UNIQUE | FULLTEXT | SPATIAL}: the index definition starts with this keyword,
+        // so its parser reads it from here.
+        if (\strtoupper((string) $action) === 'ADD' && IndexDefinition::isIndexStart($tokens)) {
+            return (new AlterOptionNode('INDEX', 'ADD', $this->indexDefinition($tokens)))->setTableOptions($tableOptions);
+        }
+
         // RENAME [TO | AS] new_tbl_name: without TO or AS the new name follows the action itself.
         if (\strtoupper((string) $action) === 'RENAME'
             && !\in_array(\strtoupper((string) $what), ['TO', 'AS', 'COLUMN', 'INDEX', 'KEY'], true)) {
@@ -52,10 +57,7 @@ class AlterOption extends DdlParserAbstract
         $what                       = \strtoupper((string) $what);
         $action                     = \strtoupper((string) $action);
 
-        $isFulltext                 = false;
-        $isSpatial                  = false;
-        $isPrimaryKey               = false;
-        $isForeignKey               = false;
+        $keyRole                    = null;
 
         switch ($what) {
 
@@ -68,39 +70,22 @@ class AlterOption extends DdlParserAbstract
                 $what               = 'INDEX';
                 break;
 
-            case 'FULLTEXT':
-
-                $isFulltext         = true;
-
-                // no break
-            case 'SPATIAL':
-
-                if (!\in_array($tokens->nextTokens()->currentTokenAsString(), ['INDEX', 'KEY'])) {
-                    throw new ParseException(
-                        'Expected INDEX KEY keyword (got \'' . $tokens->currentTokenAsString() . '\')'
-                    );
-                }
-
-                if (!$isFulltext) {
-                    $isSpatial      = true;
-                }
-
-                $what               = 'INDEX';
-                break;
-
             case 'PRIMARY':
-                $isPrimaryKey       = true;
-                // no break
             case 'FOREIGN':
 
-                if (!$isPrimaryKey) {
-                    $isForeignKey   = true;
-                }
+                // ADD of a primary key returned above as an index definition; only DROP comes here.
 
-                if ($tokens->nextTokens()->currentTokenAsString() !== 'KEY') {
+                if ($tokens->currentTokenAsString() !== 'KEY') {
                     throw new ParseException('Expected KEY keyword ' . \sprintf('(got \'%s\')', $tokens->currentTokenAsString()));
                 }
 
+                // A foreign key needs its REFERENCES clause, which no node holds.
+                if ($action === 'ADD') {
+                    throw new ParseException('ADD FOREIGN KEY is not supported in ALTER TABLE', ['line' => $line]);
+                }
+
+                $tokens->nextTokens();
+                $keyRole            = $what;
                 $what               = 'INDEX';
                 break;
 
@@ -127,36 +112,31 @@ class AlterOption extends DdlParserAbstract
 
             case 'ADD':
 
-                if ($what === 'COLUMN') {
-                    if ($tokens->currentTokenAsString() === '(') {
-                        // case: ADD [COLUMN] (col_name column_definition,...)
-                        $definition = $this->columnDefinitionWithComma($tokens);
-                    } else {
-                        $definition = $this->columnDefinition($tokens);
-                    }
+                if ($what !== 'COLUMN') {
+                    throw new ParseException([
+                        'template'  => 'Unsupported operation: {action} {what}',
+                        'action'    => $action,
+                        'what'      => $what,
+                    ]);
+                }
 
-                } elseif ($what === 'INDEX') {
-                    $definition     = $this->indexDefinition($tokens);
-
-                    if ($isFulltext) {
-                        $definition->setIndexRole('FULLTEXT');
-                    } elseif ($isPrimaryKey) {
-                        $definition->setIndexRole('PRIMARY');
-                    } elseif ($isSpatial) {
-                        $definition->setIndexRole('SPATIAL');
-                    } elseif ($isForeignKey) {
-                        $definition->setIndexRole('FOREIGN');
-                    }
+                if ($tokens->currentTokenAsString() === '(') {
+                    // case: ADD [COLUMN] (col_name column_definition,...)
+                    $definition     = $this->columnDefinitionWithComma($tokens);
+                } else {
+                    $definition     = $this->columnDefinition($tokens);
                 }
 
                 break;
 
             case 'DROP':
 
-                if ($isPrimaryKey) {
-                    $definition     = new RawSql('PRIMARY KEY');
-                } elseif ($isForeignKey) {
-                    $definition     = new RawSql('FOREIGN KEY ' . static::columnOrIndexName($tokens));
+                // DROP PRIMARY KEY names no index; DROP FOREIGN KEY names the constraint.
+                if ($keyRole === 'PRIMARY') {
+                    $what           = 'PRIMARY KEY';
+                } elseif ($keyRole === 'FOREIGN') {
+                    $what           = 'FOREIGN KEY';
+                    $definition     = new NameDefinition(static::columnOrIndexName($tokens));
                 } else {
                     $definition     = new NameDefinition(static::columnOrIndexName($tokens));
                 }
@@ -216,7 +196,14 @@ class AlterOption extends DdlParserAbstract
                 ]);
         }
 
-        return (new AlterOptionNode($what, $action, $definition))->setTableOptions($tableOptions);
+        // DROP PRIMARY KEY has no definition; ADD COLUMN (...) has several.
+        $definitions                = match (true) {
+            $definition === null    => [],
+            \is_array($definition)  => $definition,
+            default                 => [$definition],
+        };
+
+        return (new AlterOptionNode($what, $action, ...$definitions))->setTableOptions($tableOptions);
     }
 
     protected function columnDefinition(TokensIteratorInterface $tokens): ColumnDefinitionInterface
